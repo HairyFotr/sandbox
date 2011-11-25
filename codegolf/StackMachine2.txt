@@ -1,0 +1,12 @@
+init: q0
+final: q6
+q0 eps eps - q0 eps
+q0 eps eps - q1 a
+q1 eps eps - q2 b
+q2 eps eps - q3 c
+q3 eps eps - q5 a
+q5 a a - q0 eps
+q5 a a - q5 eps
+q5 b b - q5 eps
+q5 c c - q5 eps
+q5 eps Z - q6 eps

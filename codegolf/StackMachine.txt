@@ -1,0 +1,7 @@
+init: q0
+final: q2
+q0 a Z -> q0 aZ
+q0 a a -> q0 aa
+q0 b a -> q1 eps
+q1 b a -> q1 eps
+q1 a Z -> q2 eps  
