@@ -1,6 +1,6 @@
-//just a basic graph implementation
-
-//TODO: graphviz support
+// a graph/forest implementation... allows self-connection, will maybe allow multigraphs (if I can make it not too confusing)
+// would like it if the graph magically knew some of its properties (full, connected, where the cycles are, ...)
+// and if the graph could become directed or undirected at any time and stuff like that... again, if I can make it not too confusing :)
 
 import scala.collection.mutable._
 
@@ -148,39 +148,37 @@ object HairyGraph {
         var graph = new HairyGraph[A]
         graph.addNodes(nodes.toSeq:_*);
         graphType match {//TODO: keep graph properties
-            case Random() => graph = graph.randomGraph
-            case Full() => graph = graph.fullGraph
-            case Circle() => graph = graph.circleGraph
-            case Spanning() => graph = graph.spanningTree
-            case Empty() => graph = graph.emptyGraph
+            case Random() => graph.randomGraph
+            case Full() => graph.fullGraph
+            case Circle() => graph.circleGraph
+            case Spanning() => graph.spanningTree
+            case _ => graph.emptyGraph
         }
-        graph
     }
 
     def main(args:Array[String]) {
         //testing and debugging stuff by hand
+        //*
         var graph = HairyGraph.generate[Int](List(11,HairyNode(22)))
 
+        //*/
         //scalacheck testing
         //*
         import org.scalacheck._
         import org.scalacheck.Prop._
+        import scala.collection.immutable.{Set=>immutableSet}
         //implicit def arbitraryNode:Arbitrary[HairyNode[Int]] = Arbitrary(new HairyNode[Int](randomInt))
-        implicit def arbitraryNodeSet:Arbitrary[scala.collection.immutable.Set[HairyNode[Int]]] = 
-            Arbitrary {
-                Gen.sized(size => 
-                    scala.collection.immutable.Set((0 to size).map(i=>new HairyNode[Int](i)):_*))
-            }
+        implicit def arbitraryNodeSet:Arbitrary[immutableSet[HairyNode[Int]]] = 
+            Arbitrary(Gen.sized(size => immutableSet((0 to size).map(i=>new HairyNode[Int](i)):_*)))
             
-        forAll((nodes:scala.collection.immutable.Set[HairyNode[Int]])=> {
+        forAll((nodes:immutableSet[HairyNode[Int]])=> {
             var g = HairyGraph.generate[Int](nodes)
-            ("declaration" |: {
+            ("init" |: {
                 g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0) &&
                 g.allNodes.size == nodes.size
             }) &&
             ("fullGraph" |: {
                 g = g.fullGraph
-                //println(nodes.size+","+g.allNodes.size+" "+g.allConns.size+","+(1 to nodes.size).sum+"|"+g.allNodes.toSeq.map(n=> n.conns.size).mkString("+"))
                 g.allConns.size == (1 to nodes.size).sum &&
                 g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == nodes.size)
             }) &&
@@ -190,15 +188,15 @@ object HairyGraph {
             }) &&
             ("circleGraph" |: {
                 g = g.circleGraph
-                println(g.allConns.size+" "+(nodes.size))
-                g.allNodes.size<=2 || (g.allConns.size == nodes.size &&
+                g.allNodes.size<=2 || 
+                (g.allConns.size == nodes.size &&
                     g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == 2))
             }) &&
             ("spanningTree" |: {
                 g = g.spanningTree
-                //println(g.allConns.size+" "+(nodes.size-1))
-                (nodes.size==0 && g.allConns.size==0) || (g.allConns.size == nodes.size-1 &&
-                g.allNodes.foldLeft(0)((full, node)=> full + node.conns.size) == nodes.size*2-2)
+                (nodes.size==0 && g.allConns.size==0) || 
+                (g.allConns.size == nodes.size-1 &&
+                    g.allNodes.foldLeft(0)((full, node)=> full + node.conns.size) == nodes.size*2-2)
             }) &&
             ("emptyGraph" |: {
                 g = g.emptyGraph
