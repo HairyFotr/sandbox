@@ -2,6 +2,12 @@
 // would like it if the graph magically knew some of its properties (full, connected, where the cycles are, ...)
 // and if the graph could act valued or unvalued, directed or undirected at any time and stuff like that... again, if I can make it not too confusing :)
 // tl;dr graphlib that does all, but doesn't yet
+
+//should everything be copied inside graph, or should we just wing it
+////aim for immutability -- copy or reuse if immutable below
+//should most methods return graph for chaining?
+////yes.
+
 import scala.collection.mutable._
 import scala.util.Random
 
@@ -72,30 +78,40 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
     def findAnotherFreeNode(node:Node[V]):Option[Node[V]] = allNodes.find(n=> n.conns.size==0 && n!=node) 
     def connNodes:NodeSet[V] = allNodes.filter(_.conns.size>0)
 
-    private var _root:Option[Node[V]] = None
-    def root_=(r:Option[Node[V]]) = _root = r
-    def root:Option[Node[V]] = _root match {
-        case Some(r) => Some(r)
+    //TODO: check if these nodes still exist, also which scala.collection trait defines this stuff
+    // root or just the fist thing we can get out hands onto
+    private var _head:Option[Node[V]] = None
+    //def first_=(r:Option[Node[V]]) = _root = r
+    def head:Option[Node[V]] = _head match {
+        case Some(f) => Some(f)
         case None => if(allNodes.size>0) Some(allNodes.head) else None
     }
-    
-    def addNode(value:Option[V]=None):Node[V] = {
-        val n = new Node[V](value);
-        allNodes += n
-        n
+    // last thing inserted - why as var? consider reinsertion g.addNode(alreadyInserted); g.last
+    private var _last:Option[Node[V]] = None
+    def last:Option[Node[V]] = _last match {
+        case Some(l) => Some(l)
+        case None => if(allNodes.size>0) Some(allNodes.last) else None
     }
-    def addNode(node:Node[V]):Node[V] = {
+    
+    def addNode(value:Option[V]=None):Graph[V] = {
+        addNode(new Node[V](value));
+        this
+    }
+    def addNode(node:Node[V]):Graph[V] = {
         val n = new Node[V](node);
         allNodes += n
-        n
+        _last = Some(n)
+        this
     }
-    def addNodes(nodes:Node[V]*) {
+    def addNodes(nodes:Node[V]*):Graph[V] = {
         nodes.foreach(addNode(_));
+        this
     }
-    def addConn(c:Conn[V]) {
+    def addConn(c:Conn[V]) = {
         c.nodes.foreach(n=> n.conns += c)
         allConns += c
         allNodes ++= c.nodes
+        this
     }
     def addConn(n1:Node[V], n2:Node[V], value:Option[V]=None) { addConn(new Conn[V]((n1,n2),value)) }
     
@@ -121,7 +137,7 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
     }
     def spanningTree():Graph[V] = {
         val graph = new Graph[V](this)
-        var curr = graph.root
+        var curr = graph.head
         while(graph.freeNodes.size > 0 && graph.allNodes.size > 1)
             graph.addConn(curr.get, {curr = graph.findAnotherFreeNode(curr.get); curr.get})
             
@@ -183,13 +199,16 @@ object Graph {
         //testing and debugging stuff by hand
         //*
         var graph = Graph.fromNodes[Int](List(11,Node(22)))
-
+        println(graph)
+        
+        
         //*/
         //scalacheck testing
         //*
         import org.scalacheck._
         import org.scalacheck.Prop._
         import scala.collection.immutable.{Set=>immutableSet}
+        
         //implicit def arbitraryNode:Arbitrary[Node[Int]] = Arbitrary(new Node[Int](Random.nextInt))
         implicit def arbitraryNodeSet:Arbitrary[immutableSet[Node[Int]]] = 
             Arbitrary(Gen.sized(size => immutableSet((0 to size).map(i=>new Node[Int](i)):_*)))
@@ -224,8 +243,26 @@ object Graph {
             ("emptyGraph" |: {
                 g = g.emptyGraph
                 g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0)
-            })
-        }).check
+            }) &&
+            ("addNode" |: {
+                val before = g.allNodes.size
+                g.addNode(new Node[Int])
+                val after = g.allNodes.size
+                after == before+1
+            }) &&
+            ("addNodes" |: {
+                val before = g.allNodes.size
+                g.addNodes(new Node[Int],new Node[Int],new Node[Int])
+                val after = g.allNodes.size
+                after == before+3
+            }) &&
+            ("chaining" |: {
+                val before = g.allNodes.size
+                g.addNode(new Node[Int]).addNodes(new Node[Int],new Node[Int]).addNode(new Node[Int])
+                val after = g.allNodes.size
+                after == before+4
+            }) 
+        }).check(org.scalacheck.Test.Params(minSuccessfulTests=10))
         //*/
     }
 }
