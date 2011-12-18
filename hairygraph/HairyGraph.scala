@@ -49,9 +49,11 @@ class HairyConn[V] (var value:V, val nodes:HairyTwoNode[V]){
     def this(nodes:HairyTwoNode[V]) { this(null.asInstanceOf[V], nodes) }
     def this(n1:HairyNode[V], n2:HairyNode[V]) { this((n1,n2)) }
     
-    override def hashCode:Int = hashCode2 + nodes.foldLeft(0)((code, node)=>code+node.hashCode2)
+    override def hashCode:Int = nodes.foldLeft(0)((code, node)=>code+node.hashCode2)
+    override def equals(v:Any) = v.hashCode==this.hashCode
     def hashCode2:Int = (if(value!=null) value.hashCode else 0)
-    override def toString:String = if(value!=null) value.toString else ""
+    override def toString:String = nodes.toString
+        //if(value!=null) value.toString else "null"
 }
 
 class HairyGraph[V] {//TODO: Forest actually, detect connectedness
@@ -69,7 +71,7 @@ class HairyGraph[V] {//TODO: Forest actually, detect connectedness
     def connNodes:HairyNodeSet[V] = allNodes.filter(_.conns.size>0)
 
     var _root:HairyNode[V] = null;//TODO: check the getter setter thing already...
-    def root:HairyNode[V] = if(_root==null) allNodes.head else _root;
+    def root:HairyNode[V] = if(_root==null && allNodes.size>0) allNodes.head else _root;
     
     def addNode(value:V, conns:HairyConn[V]*) {
         val n = new HairyNode[V](value);
@@ -79,7 +81,7 @@ class HairyGraph[V] {//TODO: Forest actually, detect connectedness
     }
     def addNodes(nodes:HairyNode[V]*) = { allNodes ++= nodes }
     def addConn(c:HairyConn[V]) {
-        c.nodes.foreach(n=>n.conns += c)
+        c.nodes.foreach(n=> n.conns += c)
         allConns += c
         allNodes ++= c.nodes
     }
@@ -110,7 +112,7 @@ class HairyGraph[V] {//TODO: Forest actually, detect connectedness
     def spanningTree():HairyGraph[V] = {
         val graph = new HairyGraph[V](this)
         var curr = graph.root
-        while(graph.freeNodes.size > 0) graph.addConn(curr, {curr = graph.findAnotherFreeNode(curr).get; curr})
+        while(graph.freeNodes.size > 0 && graph.allNodes.size > 1) graph.addConn(curr, {curr = graph.findAnotherFreeNode(curr).get; curr})
         graph
     }
     def randomGraph():HairyGraph[V] = {
@@ -142,9 +144,9 @@ object HairyGraph {
     case class Spanning() extends HairyGraphType
     case class Empty() extends HairyGraphType
 
-    def generate[A](nodes:List[HairyNode[A]], graphType:HairyGraphType = Empty()):HairyGraph[A] = {
+    def generate[A](nodes:scala.collection.Iterable[HairyNode[A]], graphType:HairyGraphType = Empty()):HairyGraph[A] = {
         var graph = new HairyGraph[A]
-        graph.addNodes(nodes:_*);
+        graph.addNodes(nodes.toSeq:_*);
         graphType match {//TODO: keep graph properties
             case Random() => graph = graph.randomGraph
             case Full() => graph = graph.fullGraph
@@ -158,52 +160,51 @@ object HairyGraph {
     def main(args:Array[String]) {
         //testing and debugging stuff by hand
         var graph = HairyGraph.generate[Int](List(11,HairyNode(22)))
-        graph = HairyGraph.generate[Int](List(0,0))
-        println(graph)
-        graph = graph.fullGraph
-        println
-        println(graph)
-        graph = graph.emptyGraph
-        println
-        println(graph)
-        println(graph.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0))
-
-        println
-        (println)
 
         //scalacheck testing
-        /*
+        //*
         import org.scalacheck._
-        Prop.forAll((n1:Int, n2:Int)=> {
-            var nodes = List(n1,n2)
-            println(nodes)
-            var g = HairyGraph.generate[Int](nodes.map(n=>new HairyNode(n)))
-            var r = g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0)
-            //println(r)
-            println(g)
-            g = g.fullGraph
-            r &= g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size==2*(g.allNodes.size-1)+g.allNodes.size)
-            println(g.allNodes.foldLeft(0)((sum,n)=>sum + n.conns.size))
-            //println(r)
-            println(g)
-            g = g.emptyGraph
-            r &= g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0)
-            //println(r)
-            println(g)
-            r
-        }).check//*/
+        import org.scalacheck.Prop._
+        //implicit def arbitraryNode:Arbitrary[HairyNode[Int]] = Arbitrary(new HairyNode[Int](randomInt))
+        implicit def arbitraryNodeSet:Arbitrary[scala.collection.immutable.Set[HairyNode[Int]]] = 
+            Arbitrary {
+                Gen.sized(size => 
+                    scala.collection.immutable.Set((0 to size).map(i=>new HairyNode[Int](i)):_*))
+            }
+            
+        forAll((nodes:scala.collection.immutable.Set[HairyNode[Int]])=> {
+            var g = HairyGraph.generate[Int](nodes)
+            ("declaration" |: {
+                g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0) &&
+                g.allNodes.size == nodes.size
+            }) &&
+            ("fullGraph" |: {
+                g = g.fullGraph
+                //println(nodes.size+","+g.allNodes.size+" "+g.allConns.size+","+(1 to nodes.size).sum+"|"+g.allNodes.toSeq.map(n=> n.conns.size).mkString("+"))
+                g.allConns.size == (1 to nodes.size).sum &&
+                g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == nodes.size)
+            }) &&
+            ("randomGraph" |: {
+                g = g.randomGraph
+                g.allConns.size <= (1 to nodes.size).sum
+            }) &&
+            ("circleGraph" |: {
+                g = g.circleGraph
+                println(g.allConns.size+" "+(nodes.size))
+                g.allNodes.size<=2 || (g.allConns.size == nodes.size &&
+                    g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == 2))
+            }) &&
+            ("spanningTree" |: {
+                g = g.spanningTree
+                //println(g.allConns.size+" "+(nodes.size-1))
+                (nodes.size==0 && g.allConns.size==0) || (g.allConns.size == nodes.size-1 &&
+                g.allNodes.foldLeft(0)((full, node)=> full + node.conns.size) == nodes.size*2-2)
+            }) &&
+            ("emptyGraph" |: {
+                g = g.emptyGraph
+                g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0)
+            })
+        }).check
+        //*/
     }
-
-//TODO: scalacheck
-/*
-import org.scalacheck._
-    val hg = new HairyGraph[Double]
-    implicit val connGen: Arbitrary[HairyConn[Double]] = Arbitrary(new HairyConn[Double](...))
-    
-    test("addNode") = Prop.forAll((conn:HairyConn[Double]) => {
-        val len = hg.allNodes.size
-        hg.addNode(value, conn)
-        hg.addNode(value, conn)
-        if(hg.allNodes.size-len > 1) false else true
-    })*/
 }
