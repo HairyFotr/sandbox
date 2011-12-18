@@ -60,6 +60,9 @@ object Eliza extends App {
 
     def postprocess(s:String):String = s.replaceAll("[\\s]+"-> " ");
     
+    var utteredVerbNouns = ListBuffer[String]()//TODO: don't want to talk about it, TODO save to file
+    var utteredProclamations = ListBuffer[String]()
+    
     def response(input:String):String = 
         postprocess(preprocess(input).split(" ").toList match {
             case List("hello") | List("hi") => randomString(
@@ -68,14 +71,17 @@ object Eliza extends App {
             case "i"::"am"::x => 
                 if(x.length>0 && x(0).endsWith("ing")) { // doING something
                     val x2 = x.map(w=> if(List("my","mine").contains(w)) "your" else w)
+                    utteredVerbNouns += x2.mkString(" ")
                     randomString(
                         "How does "+x2.mkString(" ")+" make you feel?",
                         "How long have you been "+x2.mkString(" ")+"?")
                 } else if(x.length>0 && List("a","an","the").contains(x(0))) { // being A something
+                    utteredProclamations += x.mkString(" ");
                     randomString(
                         "How long have you been "+x.mkString(" ")+"?",
                         "How does being "+x.mkString(" ")+" make you feel?")
                 } else if(x.length==1) {
+                    utteredProclamations += x.mkString(" ");
                     randomString(
                         "How long have you been "+x.mkString(" ")+"?")
                 } else {
@@ -116,8 +122,11 @@ object Eliza extends App {
             case "they"::"are"::x::_ => randomString(
                     "Why do you think they're "+x+"?")
             case "because"::_ => randomString(
+                    if(utteredVerbNouns.size>0) {
+                        "OK. would you like to talk about "+utteredVerbNouns(randomInt(utteredVerbNouns.size))+"?"
+                    } else
                     "I understand... would you like to talk about something else?",
-                    "I understand your reasons... How does that make you feel?"
+                    "OK... but how does that make you feel?"
                 )
             case "for"::x => 
                 randomString(
@@ -128,15 +137,21 @@ object Eliza extends App {
                 )
             case "yes"::x => 
                 randomString(
-                    "Are you positive?",
-                    "You seem sure..."
-                )
+                    "You seem sure...")
             case x => 
-                if(x.contains("you")) randomString( 
+                if(x.contains("you")) randomString(
                     "Lets talk about something else...",
                     "Do you really think that about me?") //TODO
                 else randomString(
+                    if(utteredProclamations.size>0) {
+                        randomString(
+                            "Let's talk more about you being "+utteredProclamations(randomInt(utteredProclamations.size))+".")
+                    } else
                     "Lets change the topic",
+                    if(utteredVerbNouns.size>0) {
+                        randomString(
+                            "Let's talk about "+utteredVerbNouns(randomInt(utteredVerbNouns.size))+" some more.")
+                    } else
                     "Why is that?",
                     "Please tell me more.")
         })
@@ -145,6 +160,8 @@ object Eliza extends App {
     do {
         input = readLine()
         println(preprocess(input))
+        println(utteredProclamations)
+        println(utteredVerbNouns)
         println(response(input))
     } while(input!="")
 }
