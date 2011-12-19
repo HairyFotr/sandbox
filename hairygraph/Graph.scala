@@ -7,6 +7,8 @@
 ////aim for immutability -- copy or reuse if immutable below
 //should most methods return graph for chaining?
 ////yes.
+//are you reading this code as a seasoned functional developer and screaming in terror
+////yes.
 
 import scala.collection.mutable._
 import scala.util.Random
@@ -23,26 +25,37 @@ object Globals {
 }
 import Globals._
 
-class Node[V] (val conns:ConnSet[V] = new ConnSet[V], var value:Option[V] = None, val id:Int=nextId(), var tag:Int=0) {
-    var valued = value match {
-        case Some(_) => true
-        case None => false
-    }
+//TODO notsure if doing it for added convenience, or because I don't really get Option or default values.
+class Tag(var tag:Option[Int]=None) {
+    def this(i:Int) = this(Some(i))
+    
+    var tagged = tag.isDefined
+    def untag = tag = None
+    def apply():Int = tag.getOrElse(0)
+    def apply(i:Int):Tag = { tag = Some(i); this }
+    def apply(t:Tag):Tag = { tag = t.tag; this }
+}
+object Tag {
+    def apply() = new Tag()
+    def apply(i:Int) = new Tag(i)
+    def apply(i:Option[Int]) = new Tag(i)
+}
 
+class Node[V] (val conns:ConnSet[V] = new ConnSet[V], var value:Option[V] = None, val id:Int=nextId(), val tag:Tag=Tag()) {
+    var valued = value.isDefined
     def this(n:Node[V]) = this(value=n.value,id=n.id,tag=n.tag)
     def this(v:V) = this(value = if(v==null) None else Some(v))
     def this(v:Option[V]) = this(value = v)
     
-    
-    def graphWhile(condition:Node[V]=>Boolean, tag:Int=1, bounded:Boolean=true)(f:Node[V]=>Unit) {
-        if(condition(this) && (!bounded || (bounded && this.tag<tag))) {
+    def graphWhile(condition:Node[V]=>Boolean, tag:Tag=Tag())(f:Node[V]=>Unit) {
+        if(condition(this) && ((!tag.tagged || !this.tag.tagged) || (this.tag() <= tag()))) {
             f(this)
-            this.tag+=1;
+            if(tag.tagged) this.tag(tag);
             for(conn <- conns) 
-                (if(conn.nodes._1==this) conn.nodes._2 else conn.nodes._1).graphWhile(condition, tag, bounded)(f)
+                (if(conn.nodes._1==this) conn.nodes._2 else conn.nodes._1).graphWhile(condition, tag)(f)
         }
     }
-    override def hashCode:Int = id
+    override def hashCode:Int = id + value.hashCode
     override def equals(v:Any) = v.hashCode==this.hashCode
     override def toString:String = id+(if(valued) "("+value+")" else "")
 }
@@ -50,14 +63,11 @@ object Node {
     def apply[A](a:A) = new Node[A](a);
 }
 class Conn[V] (val nodes:TwoNode[V], var value:Option[V] = None, val id:Int = nextId()) {// would this work better as a pimped Tuple
-    var valued = value match {
-        case Some(_) => true
-        case None => false
-    }
+    var valued = value.isDefined
     var directed = false;
     def this(n1:Node[V], n2:Node[V]) { this((n1,n2)) }
     
-    override def hashCode:Int = if(directed) (nodes).hashCode else nodes.foldLeft(0)((code, node)=>code+node.hashCode)
+    override def hashCode:Int = if(directed) nodes.hashCode else nodes.foldLeft(0)((code, node)=>code+node.hashCode)
     override def equals(v:Any) = v.hashCode==this.hashCode
     override def toString:String = nodes._1.id+"--"+id+"-"+(if(directed) ">" else "-")+nodes._2.id
 }
@@ -81,17 +91,11 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
     //TODO: check if these nodes still exist, also which scala.collection trait defines this stuff
     // root or just the fist thing we can get out hands onto
     private var _head:Option[Node[V]] = None
-    //def first_=(r:Option[Node[V]]) = _root = r
-    def head:Option[Node[V]] = _head match {
-        case Some(f) => Some(f)
-        case None => if(allNodes.size>0) Some(allNodes.head) else None
-    }
-    // last thing inserted - why as var? consider reinsertion g.addNode(alreadyInserted); g.last
+    def head:Option[Node[V]] = _head.orElse(if(allNodes.size>0) Some(allNodes.head) else None)
+    
+    // last thing inserted into allNodes - why as var? Consider reinsertion g.addNode(alreadyInserted); g.last
     private var _last:Option[Node[V]] = None
-    def last:Option[Node[V]] = _last match {
-        case Some(l) => Some(l)
-        case None => if(allNodes.size>0) Some(allNodes.last) else None
-    }
+    def last:Option[Node[V]] = _last.orElse(if(allNodes.size>0) Some(allNodes.last) else None)
     
     def addNode(value:Option[V]=None):Graph[V] = {
         addNode(new Node[V](value));
@@ -115,17 +119,15 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
     }
     def addConn(n1:Node[V], n2:Node[V], value:Option[V]=None) { addConn(new Conn[V]((n1,n2),value)) }
     
-    /*def graphWhile(condition:Node[V]=>Boolean)(f:Node[V]=>Unit) {
-        if(allNodes.size > 0) root.graphWhile(condition)(f);
+    def graphWalk(f:Node[V]=>Unit, tag:Tag=Tag()) = graphWhile((n)=>true, tag)(f);
+    def graphWhile(condition:Node[V]=>Boolean, tag:Tag=Tag())(f:Node[V]=>Unit) {
+        if(head != None) head.get.graphWhile(condition)(f);
     }
-    def graphWalk(f:Node[V]=>Unit, tag:Int=1) {
-        if(allNodes.size > 0) root.graphWhile((n)=>true, tag)(f);
-    }*/
     
     //
     def fullGraph():Graph[V] = {
         val graph = new Graph[V](this)
-        val nodes = graph.allNodes.toSeq
+        val nodes = graph.allNodes
         for(n1 <- nodes; n2 <- nodes) graph.addConn(n1, n2)
         graph
     }

@@ -17,8 +17,8 @@ object Eliza extends App {
         implicit def String2PimpedString(s:String):PimpedString = new PimpedString(s)
     }
     import PimpedString._
-    def randomString(s:String*):String = s(randomInt(s.length))
     
+    def randomString(s:String*):String = s(randomInt(s.length))
 
     def clean(s:String):String = 
         s.replaceAll(
@@ -60,8 +60,16 @@ object Eliza extends App {
 
     def postprocess(s:String):String = s.replaceAll("[\\s]+"-> " ");
     
-    var utteredVerbNouns = ListBuffer[String]()//TODO: don't want to talk about it, TODO save to file
-    var utteredProclamations = ListBuffer[String]()
+    object Memory {
+        abstract class MemoryType
+        case class Random() extends MemoryType
+        
+        //def +:()
+        
+        var utteredVerbNouns = ListBuffer[String]()//TODO: don't want to talk about it, TODO save to file
+        var utteredProclamations = ListBuffer[String]()
+    }
+    import Memory._
     
     def response(input:String):String = 
         postprocess(preprocess(input).split(" ").toList match {
