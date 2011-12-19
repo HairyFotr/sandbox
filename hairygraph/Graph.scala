@@ -29,11 +29,11 @@ import Globals._
 class Tag(var tag:Option[Int]=None) {
     def this(i:Int) = this(Some(i))
     
-    var tagged = tag.isDefined
+    def tagged = tag.isDefined
     def untag = tag = None
     def apply():Int = tag.getOrElse(0)
     def apply(i:Int):Tag = { tag = Some(i); this }
-    def apply(t:Tag):Tag = { tag = t.tag; this }
+    def apply(t:Tag):Tag = { if(t.tagged) tag = Some(t.tag.get) else tag = None; this }
 }
 object Tag {
     def apply() = new Tag()
@@ -44,20 +44,22 @@ object Tag {
 class Node[V] (val conns:ConnSet[V] = new ConnSet[V], var value:Option[V] = None, val id:Int=nextId(), val tag:Tag=Tag()) {
     var valued = value.isDefined
     def this(n:Node[V]) = this(value=n.value,id=n.id,tag=n.tag)
-    def this(v:V) = this(value = if(v==null) None else Some(v))
+    def this(v:V) = this(value = (if(v==null) None else Some(v)))
     def this(v:Option[V]) = this(value = v)
     
-    def graphWhile(condition:Node[V]=>Boolean, tag:Tag=Tag())(f:Node[V]=>Unit) {
-        if(condition(this) && ((!tag.tagged || !this.tag.tagged) || (this.tag() <= tag()))) {
+    def graphWhile(condition:Node[V]=>Boolean, tag:Tag=Tag(), noReturn:Option[Node[V]]=None)(f:Node[V]=>Unit) {
+        if(condition(this) && ((!tag.tagged || !this.tag.tagged || this.tag() != tag()))) {
             f(this)
-            if(tag.tagged) this.tag(tag);
-            for(conn <- conns) 
-                (if(conn.nodes._1==this) conn.nodes._2 else conn.nodes._1).graphWhile(condition, tag)(f)
+            if(tag.tagged) this.tag(tag());
+            for(conn <- conns) {
+                val node = (if(conn.nodes._1==this) conn.nodes._2 else conn.nodes._1)
+                if(noReturn == None || node != noReturn.get) node.graphWhile(condition, tag, Some(this))(f)
+            }
         }
     }
-    override def hashCode:Int = id + value.hashCode
+    override def hashCode:Int = id + (if(valued) value.get.hashCode else 0)
     override def equals(v:Any) = v.hashCode==this.hashCode
-    override def toString:String = id+(if(valued) "("+value+")" else "")
+    override def toString:String = id+(if(valued) "("+value.get+")" else "")
 }
 object Node {
     def apply[A](a:A) = new Node[A](a);
@@ -111,17 +113,25 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
         nodes.foreach(addNode(_));
         this
     }
-    def addConn(c:Conn[V]) = {
+    def addConn(c:Conn[V]):Graph[V] = {
         c.nodes.foreach(n=> n.conns += c)
         allConns += c
         allNodes ++= c.nodes
         this
     }
-    def addConn(n1:Node[V], n2:Node[V], value:Option[V]=None) { addConn(new Conn[V]((n1,n2),value)) }
+    def addConn(n1:Node[V], n2:Node[V], value:Option[V]=None):Graph[V] = { 
+        addConn(new Conn[V]((n1,n2),value))
+    }
     
-    def graphWalk(f:Node[V]=>Unit, tag:Tag=Tag()) = graphWhile((n)=>true, tag)(f);
+    def removeConn(c:Conn[V]):Graph[V] = {
+        c.nodes.foreach(n=> n.conns -= c)
+        allConns -= c
+        this
+    }
+    
+    def graphWalk(tag:Tag=Tag())(f:Node[V]=>Unit) = graphWhile((n)=>true, tag)(f);
     def graphWhile(condition:Node[V]=>Boolean, tag:Tag=Tag())(f:Node[V]=>Unit) {
-        if(head != None) head.get.graphWhile(condition)(f);
+        if(head != None) head.get.graphWhile(condition, tag)(f);
     }
     
     //
@@ -201,8 +211,7 @@ object Graph {
         //testing and debugging stuff by hand
         //*
         var graph = Graph.fromNodes[Int](List(11,Node(22)))
-        println(graph)
-        
+        println(graph)       
         
         //*/
         //scalacheck testing
@@ -216,53 +225,80 @@ object Graph {
             Arbitrary(Gen.sized(size => immutableSet((0 to size).map(i=>new Node[Int](i)):_*)))
             
         forAll((nodes:immutableSet[Node[Int]])=> {
-            var g = Graph.fromNodes[Int](nodes)
-            ("init" |: {
-                g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0) &&
-                g.allNodes.size == nodes.size
-            }) &&
-            ("fullGraph" |: {
-                g = g.fullGraph
-                g.allConns.size == (1 to nodes.size).sum &&
-                g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == nodes.size)
-            }) &&
-            ("randomGraph" |: {
-                g = g.randomGraph
-                g.allConns.size <= (1 to nodes.size).sum
-            }) &&
-            ("CircularGraph" |: {
-                g = g.CircularGraph
-                g.allNodes.size<=2 || 
-                (g.allConns.size == nodes.size &&
-                    g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == 2))
-            }) &&
-            ("spanningTree" |: {
-                g = g.spanningTree
-                (nodes.size==0 && g.allConns.size==0) || 
-                (g.allConns.size == nodes.size-1 &&
-                    g.allNodes.foldLeft(0)((full, node)=> full + node.conns.size) == nodes.size*2-2)
-            }) &&
-            ("emptyGraph" |: {
-                g = g.emptyGraph
-                g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0)
-            }) &&
+            { 
+                var g = Graph.fromNodes[Int](nodes)
+                ("init" |: {
+                    g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0) &&
+                    g.allNodes.size == nodes.size
+                }) &&
+                ("fullGraph" |: {
+                    g = g.fullGraph
+                    g.allConns.size == (1 to nodes.size).sum &&
+                    g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == nodes.size)
+                }) &&
+                ("randomGraph" |: {
+                    g = g.randomGraph
+                    g.allConns.size <= (1 to nodes.size).sum
+                }) &&
+                ("CircularGraph" |: {
+                    g = g.CircularGraph
+                    g.allNodes.size<=2 || 
+                    (g.allConns.size == nodes.size &&
+                        g.allNodes.foldLeft(true)((full, node)=> full && node.conns.size == 2))
+                }) &&
+                ("spanningTree" |: {
+                    g = g.spanningTree
+                    (nodes.size==0 && g.allConns.size==0) || 
+                    (g.allConns.size == nodes.size-1 &&
+                        g.allNodes.foldLeft(0)((full, node)=> full + node.conns.size) == nodes.size*2-2)
+                }) &&
+                ("emptyGraph" |: {
+                    g = g.emptyGraph
+                    g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0)
+                })
+            } &&
             ("addNode" |: {
+                var g = Graph.fromNodes[Int](nodes)
                 val before = g.allNodes.size
                 g.addNode(new Node[Int])
                 val after = g.allNodes.size
                 after == before+1
             }) &&
             ("addNodes" |: {
+                var g = Graph.fromNodes[Int](nodes)
                 val before = g.allNodes.size
                 g.addNodes(new Node[Int],new Node[Int],new Node[Int])
                 val after = g.allNodes.size
                 after == before+3
             }) &&
             ("chaining" |: {
+                var g = Graph.fromNodes[Int](nodes)
                 val before = g.allNodes.size
                 g.addNode(new Node[Int]).addNodes(new Node[Int],new Node[Int]).addNode(new Node[Int])
                 val after = g.allNodes.size
                 after == before+4
+            }) 
+            ("graphWalkTag" |: { //should work even for circular
+                var g = Graph.fromNodes[Int](nodes)
+                g = g.fullGraph
+                var allNodes = new NodeSet[Int]
+                var counter = 0
+                g.graphWalk(Tag(1))((n) => {
+                    allNodes += n
+                    counter += 1
+                })
+                counter==g.allNodes.size && allNodes.size == g.allNodes.size
+            }) 
+            ("graphWalkNotag" |: { //should work for non-circular
+                var g = Graph.fromNodes[Int](nodes)
+                g = g.spanningTree
+                var allNodes = new NodeSet[Int]
+                var counter = 0
+                g.graphWalk()((n) => {
+                    allNodes += n
+                    counter += 1
+                })
+                counter==g.allNodes.size && allNodes.size == g.allNodes.size
             }) 
         }).check(org.scalacheck.Test.Params(minSuccessfulTests=10))
         //*/
