@@ -1,0 +1,1 @@
+/home/hairy/.bash_aliases
