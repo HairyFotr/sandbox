@@ -2,6 +2,7 @@
 // initial code copied from: http://www.slideshare.net/vsssuresh/scala-as-a-declarative-language slide 38
 
 //TODO:
+//sound less like a therapist :)
 //time (x ago, right now, etc)
 //probabalistic state machine (if something just said don't repeat it, remember some verbs and nouns)
 object Eliza extends App {
@@ -60,16 +61,23 @@ object Eliza extends App {
 
     def postprocess(s:String):String = s.replaceAll("[\\s]+"-> " ");
     
+    abstract class MemoryType
+    object IsVerbing extends MemoryType
+    object IsNoun extends MemoryType
     object Memory {
-        abstract class MemoryType
-        case class Random() extends MemoryType
-        
-        //def +:()
-        
-        var utteredVerbNouns = ListBuffer[String]()//TODO: don't want to talk about it, TODO save to file
-        var utteredProclamations = ListBuffer[String]()
+        //TODO: manipulate memory "don't want to talk about it", etc
+        //TODO save to file
+        var memories = HashMap[MemoryType, LinkedHashSet[String]]()
+        def <=(memory:MemoryType,s:String) = memories.getOrElseUpdate(memory, new LinkedHashSet[String]) += s        
+        def ->(mtype:MemoryType, sentence:Option[String]=None):Option[String] = {
+            //TODO analyze sentence to retrieve apropriate memory
+            val mems = memories.get(mtype)
+            if(mems.isDefined)
+                Some(randomString(mems.get.toSeq:_*))
+            else 
+                None
+        }
     }
-    import Memory._
     
     def response(input:String):String = 
         postprocess(preprocess(input).split(" ").toList match {
@@ -79,17 +87,17 @@ object Eliza extends App {
             case "i"::"am"::x => 
                 if(x.length>0 && x(0).endsWith("ing")) { // doING something
                     val x2 = x.map(w=> if(List("my","mine").contains(w)) "your" else w)
-                    utteredVerbNouns += x2.mkString(" ")
+                    Memory <= (IsVerbing, x2.mkString(" "))
                     randomString(
                         "How does "+x2.mkString(" ")+" make you feel?",
                         "How long have you been "+x2.mkString(" ")+"?")
                 } else if(x.length>0 && List("a","an","the").contains(x(0))) { // being A something
-                    utteredProclamations += x.mkString(" ");
+                    Memory <= (IsNoun, x.mkString(" "));
                     randomString(
                         "How long have you been "+x.mkString(" ")+"?",
                         "How does being "+x.mkString(" ")+" make you feel?")
                 } else if(x.length==1) {
-                    utteredProclamations += x.mkString(" ");
+                    Memory <= (IsNoun, x.mkString(" "));
                     randomString(
                         "How long have you been "+x.mkString(" ")+"?")
                 } else {
@@ -129,9 +137,11 @@ object Eliza extends App {
                     "What makes you think I "+x+" you?")
             case "they"::"are"::x::_ => randomString(
                     "Why do you think they're "+x+"?")
-            case "because"::_ => randomString(
-                    if(utteredVerbNouns.size>0) {
-                        "OK. would you like to talk about "+utteredVerbNouns(randomInt(utteredVerbNouns.size))+"?"
+            case "because"::_ => 
+                val mem = Memory->(IsVerbing)
+                randomString(
+                    if(mem.isDefined) {
+                        "OK. would you like to talk about "+mem.get+"?"
                     } else
                     "I understand... would you like to talk about something else?",
                     "OK... but how does that make you feel?"
@@ -150,26 +160,29 @@ object Eliza extends App {
                 if(x.contains("you")) randomString(
                     "Lets talk about something else...",
                     "Do you really think that about me?") //TODO
-                else randomString(
-                    if(utteredProclamations.size>0) {
+                else {
+                    val memNoun = Memory->(IsNoun)
+                    val memVerb = Memory->(IsVerbing)
+                    randomString(
+                    if(memNoun.isDefined) {
                         randomString(
-                            "Let's talk more about you being "+utteredProclamations(randomInt(utteredProclamations.size))+".")
+                            "Let's talk more about you being "+memNoun.get+".")
                     } else
                     "Lets change the topic",
-                    if(utteredVerbNouns.size>0) {
+                    if(memVerb.isDefined) {
                         randomString(
-                            "Let's talk about "+utteredVerbNouns(randomInt(utteredVerbNouns.size))+" some more.")
+                            "Let's talk about "+memVerb.get+" some more.")
                     } else
                     "Why is that?",
                     "Please tell me more.")
+                }
         })
     
     var input = "";
     do {
         input = readLine()
         println(preprocess(input))
-        println(utteredProclamations)
-        println(utteredVerbNouns)
+        println(Memory.memories)
         println(response(input))
     } while(input!="")
 }
