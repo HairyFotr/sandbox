@@ -5,6 +5,7 @@
 
 //should everything be copied inside graph, or should we just wing it
 ////aim for immutability -- copy or reuse if immutable below
+////.seal() makes it immutable (also then you can precompute a bunch of stuff easier)
 //should most methods return graph for chaining?
 ////yes.
 //are you reading this code as a seasoned functional developer and screaming in terror
@@ -16,9 +17,9 @@ import scala.util.Random
 object Globals {
     type NodeSet[T] = LinkedHashSet[Node[T]]
     type ConnSet[T] = HashSet[Conn[T]]
-    type TwoNode[T] = (Node[T], Node[T])
+    type NodePair[T] = (Node[T], Node[T])
     type NodeList[T] = List[Node[T]]
-    implicit def TwoNode2NodeList[T](n:TwoNode[T]):NodeList[T] = List(n._1, n._2)
+    implicit def NodePair2NodeList[T](n:NodePair[T]):NodeList[T] = List(n._1, n._2)
     implicit def Someting2Node[A](v:A) = new Node[A](v);
 
     def nextId():Int = Random.nextInt
@@ -52,7 +53,7 @@ class Node[V] (val conns:ConnSet[V] = new ConnSet[V], var value:Option[V] = None
             f(this)
             if(tag.tagged) this.tag(tag());
             for(conn <- conns) {
-                val node = (if(conn.nodes._1==this) conn.nodes._2 else conn.nodes._1)
+                val node = conn.other(this)
                 if(noReturn == None || node != noReturn.get) node.graphWhile(condition, tag, Some(this))(f)
             }
         }
@@ -62,12 +63,14 @@ class Node[V] (val conns:ConnSet[V] = new ConnSet[V], var value:Option[V] = None
     override def toString:String = id+(if(valued) "("+value.get+")" else "")
 }
 object Node {
+    def apply[A]() = new Node[A]();
     def apply[A](a:A) = new Node[A](a);
 }
-class Conn[V] (val nodes:TwoNode[V], var value:Option[V] = None, val id:Int = nextId()) {// would this work better as a pimped Tuple
+class Conn[V] (val nodes:NodePair[V], var value:Option[V] = None, val id:Int = nextId()) {// would this work better as a pimped Tuple
     var valued = value.isDefined
     var directed = false;
     def this(n1:Node[V], n2:Node[V]) { this((n1,n2)) }
+    def other(n:Node[V]):Node[V] = (if(nodes._1==n) nodes._2 else nodes._1)
     
     override def hashCode:Int = if(directed) nodes.hashCode else nodes.foldLeft(0)((code, node)=>code+node.hashCode)
     override def equals(v:Any) = v.hashCode==this.hashCode
@@ -119,9 +122,8 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
         allNodes ++= c.nodes
         this
     }
-    def addConn(n1:Node[V], n2:Node[V], value:Option[V]=None):Graph[V] = { 
-        addConn(new Conn[V]((n1,n2),value))
-    }
+    //def addConn(n1:Node[V], n2:Node[V], value:Option[V]=None):Graph[V] = addConn(new Conn[V]((n1,n2),value))
+    def addConn(n:NodePair[V], value:Option[V]=None):Graph[V] = addConn(new Conn[V](n,value))
     
     def removeConn(c:Conn[V]):Graph[V] = {
         c.nodes.foreach(n=> n.conns -= c)
@@ -133,32 +135,67 @@ class Graph[V] {//TODO: Forest actually, detect connectedness
     def graphWhile(condition:Node[V]=>Boolean, tag:Tag=Tag())(f:Node[V]=>Unit) {
         if(head != None) head.get.graphWhile(condition, tag)(f);
     }
+
+    def randomStep(n:Node[V]):Option[Node[V]] = 
+        if(n.conns.size == 0) 
+            None
+        else 
+            Some(n.conns.toSeq(Random.nextInt(n.conns.size)).other(n))
+        
+    def markovChainStep(n:Node[V]):Option[Node[V]] = { //TODO: detect types
+        var sum = 0d
+        var sums = new LinkedHashMap[Double, Node[V]]
+        n.conns.foreach(c=> c.value.foreach(_ match {
+            case v:Double => if(v>0) { sum+=v; sums+=sum->c.other(n) }
+        }))
+        if(sum > 0) {
+            var r = Random.nextDouble * sum
+            Some(sums.find(m => r <= m._1).get._2)
+        } else {
+            None
+        }
+    }
+    /*
+        if(!n.valued)
+            None
+        else 
+            n.value.get match {
+                case v:Double =>
+                case _ => None
+            }*/
+            
+    var curr:Option[Node[V]] = None
+    def graphStep(func:(Node[V]=>Option[Node[V]])=randomStep):Option[Node[V]] = {
+        if(curr==None) curr = head
+        if(curr!=None) curr = func(curr.get)
+        curr
+    }
     
     //
     def fullGraph():Graph[V] = {
         val graph = new Graph[V](this)
         val nodes = graph.allNodes
-        for(n1 <- nodes; n2 <- nodes) graph.addConn(n1, n2)
+        for(n1 <- nodes; n2 <- nodes) graph.addConn(n1->n2)
         graph
     }
     def CircularGraph():Graph[V] = {
         val graph = new Graph[V](this)
         val nodes = graph.allNodes.toSeq
-        for(i <- 0 until nodes.size; val (n1,n2) = (nodes(i), nodes((i+1)%nodes.size))) graph.addConn(n1, n2)
+        for(i <- 0 until nodes.size; val (n1,n2) = (nodes(i), nodes((i+1)%nodes.size))) graph.addConn(n1->n2)
         graph
     }
     def spanningTree():Graph[V] = {
         val graph = new Graph[V](this)
         var curr = graph.head
         while(graph.freeNodes.size > 0 && graph.allNodes.size > 1)
-            graph.addConn(curr.get, {curr = graph.findAnotherFreeNode(curr.get); curr.get})
+            graph.addConn(curr.get -> {curr = graph.findAnotherFreeNode(curr.get); curr.get})
             
         graph
     }
     def randomGraph():Graph[V] = {
         val graph = new Graph[V](this)
         val nodes = graph.allNodes.toSeq
-        for(n1 <- nodes; i <- 0 until Random.nextInt(nodes.size); val n2 = nodes(Random.nextInt(nodes.size))) graph.addConn(n1, n2)
+        for(n1 <- nodes; i <- 0 until Random.nextInt(nodes.size); val n2 = nodes(Random.nextInt(nodes.size))) graph.addConn(n1->n2)
         graph
     }
     def emptyGraph():Graph[V] = new Graph[V](this)
@@ -197,6 +234,31 @@ object Graph {
             case _ => graph.emptyGraph
         }
     }
+    
+    //node->None->node
+    def fromPairs[A](pairs:NodePair[A]*):Graph[A] = {
+        var graph = new Graph[A]
+        pairs.foreach(p=> graph.addConn(p))
+        graph
+    }
+        
+    //curse you type erasure
+    /*def fromTriplets[A](triplets:((Node[A],A),Node[A])*):Graph[A] =
+        fromTriplets(triplets.map(t=> t._1._1->Some(t._1._2)->t._2):_*);*/
+    
+    def fromTriplets[A](triplets:((Node[A],A),Node[A])*):Graph[A] = {//node->conn->node
+        var graph = new Graph[A]
+        triplets.foreach(t=> graph.addConn(t._1._1 -> t._2, Some(t._1._2)))
+        graph
+    }
+    def fromProbMatrix[A](m:scala.collection.Seq[scala.collection.Seq[A]]):Graph[A] = {//node->conn->node
+        var graph = new Graph[A]
+        var nodes = for(i <- 0 until m.size) yield Node[A]()
+        for(i <- 0 until m.size; j <- 0 until m(i).size) graph.addConn(nodes(i) -> nodes(j), Some(m(i)(j)))
+        graph
+    }
+
+
     /*
     //confused about how to copy in a nice way, and if that's necesarry
     def fromConns[A](conns:Iterable[Conn[A]]):Graph[A] = {
@@ -210,12 +272,33 @@ object Graph {
     def main(args:Array[String]) {
         //testing and debugging stuff by hand
         //*
-        var graph = Graph.fromNodes[Int](List(11,Node(22)))
-        println(graph)       
+        val matrix = List(
+            List(0.3, 0.1, 0.6),
+            List(0.1, 0.6, 0.3),
+            List(0.4, 0.4, 0.2)
+        )
+        var graph = Graph.fromProbMatrix[Double](matrix)
+        /*graph.curr = {//beautify
+            var r=util.Random.nextDouble
+            if(r<=1/3d) 
+                Some(nodes(0)) 
+            else if(r<=2/3d) 
+                Some(nodes(1)) 
+            else
+                Some(nodes(2)) 
+        }*/
+        val runs=75000
+        var probs = new HashMap[Node[Double], Int]
+        for(i <- 1 to runs) {
+            graph.graphStep(graph.markovChainStep)
+            probs += graph.curr.get -> (probs.getOrElseUpdate(graph.curr.get, 0)+1)
+        }
+
+        println(probs.map(m=> m._1->(m._2/(runs+0d))))
+        //println(graph)
         
-        //*/
         //scalacheck testing
-        //*
+        /*
         import org.scalacheck._
         import org.scalacheck.Prop._
         import scala.collection.immutable.{Set=>immutableSet}
@@ -225,7 +308,7 @@ object Graph {
             Arbitrary(Gen.sized(size => immutableSet((0 to size).map(i=>new Node[Int](i)):_*)))
             
         forAll((nodes:immutableSet[Node[Int]])=> {
-            { 
+            {
                 var g = Graph.fromNodes[Int](nodes)
                 ("init" |: {
                     g.allNodes.foldLeft(true)((empty, node)=> empty && node.conns.size==0) &&
@@ -277,7 +360,7 @@ object Graph {
                 g.addNode(new Node[Int]).addNodes(new Node[Int],new Node[Int]).addNode(new Node[Int])
                 val after = g.allNodes.size
                 after == before+4
-            }) 
+            }) &&
             ("graphWalkTag" |: { //should work even for circular
                 var g = Graph.fromNodes[Int](nodes)
                 g = g.fullGraph
@@ -288,7 +371,7 @@ object Graph {
                     counter += 1
                 })
                 counter==g.allNodes.size && allNodes.size == g.allNodes.size
-            }) 
+            }) &&
             ("graphWalkNotag" |: { //should work for non-circular
                 var g = Graph.fromNodes[Int](nodes)
                 g = g.spanningTree
@@ -299,7 +382,16 @@ object Graph {
                     counter += 1
                 })
                 counter==g.allNodes.size && allNodes.size == g.allNodes.size
-            }) 
+            }) &&
+            ("fromPairs" |: {
+                var nds = nodes.toSeq
+                var pairs = for(i <- 0 until nds.size) yield nds(i)->nds((i+1)%nds.size)
+                var g = Graph.fromPairs[Int](pairs:_*)
+                var g2 = Graph.fromNodes[Int](nodes, Circular())
+                
+                g.allNodes.size == g2.allNodes.size &&
+                g.allConns.size == g2.allConns.size
+            }) //*&& 
         }).check(org.scalacheck.Test.Params(minSuccessfulTests=10))
         //*/
     }
