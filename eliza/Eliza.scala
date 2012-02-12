@@ -146,6 +146,27 @@ object Eliza extends App {
                     "I understand... would you like to talk about something else?",
                     "OK... but how does that make you feel?"
                 )
+            case "since"::x => 
+                randomString(
+                    "What did you do before that?"
+                )
+            case "for"::"instance"::x => 
+                    if(x.length > 1) 
+                        randomString("Can you think of any other examples?") //for instance, bla bla bla
+                    else 
+                        randomString( //"lets talk about something else" "for instance?"
+                            "Let's talk about what you're doing",
+                            "How are your life plans progressing",
+                            "What can you tell me about yourself?",
+                            {
+                                val memNoun = Memory->(IsNoun)
+                                val memVerb = Memory->(IsVerbing)
+
+                                if(memNoun.isDefined) "Let's talk more about you being "+memNoun.get+"." else
+                                if(memVerb.isDefined) "Let's talk about "+memVerb.get+" some more." else
+                                "Please tell me more."
+                            }
+                        )
             case "for"::x => 
                 randomString(
                     if(x.contains("years")||x.contains("long")||x.contains("while")) 
@@ -155,7 +176,12 @@ object Eliza extends App {
                 )
             case "yes"::x => 
                 randomString(
-                    "You seem sure...")
+                    "You seem sure...",
+                    "Are you certain?",
+                    "Are you sure?")
+            case "no"::x => 
+                randomString(
+                    "Why not?")
             case x => 
                 if(x.contains("you")) randomString(
                     "Lets talk about something else...",
